@@ -294,6 +294,11 @@ try {
   check('Finalize refuses paths from another wedding', (await fetch(`${APP}/api/admin/events/${eventId}/upload-finalize`, { method: 'POST', headers: adminHeaders, body: JSON.stringify({ uploads: [{ originalPath: `${ev2.event.id}/x-private.jpg`, previewPath: `${ev2.event.id}/x.jpg`, name: 'x.jpg' }] }) })).status === 400);
   check('Public event API exposes no photo data', !JSON.stringify(await (await fetch(`${APP}/api/events/anjali-anukool`)).json()).includes('path'));
 
+  // printed-QR short links
+  const sl = await fetch(`${APP}/Anjali-Anukool`, { redirect: 'manual' });
+  check('Short link /Anjali-Anukool redirects to /w/anjali-anukool', sl.status >= 300 && sl.status < 400 && (sl.headers.get('location') || '').endsWith('/w/anjali-anukool'), `${sl.status} ${sl.headers.get('location')}`);
+  check('Short link does not shadow /admin or /privacy', (await fetch(`${APP}/privacy`, { redirect: 'manual' })).status === 200);
+
   // payment removal
   for (const p of ['/api/create-order', '/api/verify-payment', '/api/orders', '/api/admin/orders', '/api/orders/x/download-zip']) {
     const s = (await fetch(`${APP}${p}`, { method: 'POST' })).status;
