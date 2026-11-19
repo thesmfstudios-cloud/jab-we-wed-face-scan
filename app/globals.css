@@ -276,3 +276,21 @@ img { max-width: 100%; }
 .admin .btn { min-height: 42px; padding: 0 18px; font-size: 12px; letter-spacing: .12em; }
 .btn-danger { background: #fff1ee; color: #8e3b2c; border: 1px solid #ebbcb1; }
 .qr-box { background: #fff; padding: 18px; border-radius: 16px; border: 1px solid #efe1d6; display: inline-block; }
+
+/* ─── Coming soon (single-screen landing while photos are prepared) ─── */
+.soon { max-width: 440px; min-height: 100svh; display: flex; flex-direction: column; align-items: center; text-align: center; padding-top: 22px; padding-bottom: 18px; }
+.soon-arch { margin-top: 14px; width: min(64vw, 250px); aspect-ratio: 4 / 5; padding: 7px; border: 1px solid var(--terracotta); border-radius: 999px 999px 18px 18px; background: rgba(255, 250, 245, .75); box-shadow: var(--shadow); }
+.soon-arch img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: 50% 28%; border-radius: 999px 999px 12px 12px; }
+.soon-couple { font-family: var(--script); font-weight: 400; color: var(--terracotta); font-size: clamp(40px, 11vw, 54px); line-height: 1; margin: 14px 0 0; }
+.soon-date { margin-top: 4px; font-size: 11px; letter-spacing: .26em; text-transform: uppercase; color: var(--muted); }
+.soon-badge { margin-top: 14px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255, 250, 245, .8); font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--terracotta); }
+.soon-badge span { width: 7px; height: 7px; border-radius: 50%; background: var(--terracotta); animation: soonPulse 1.8s ease-in-out infinite; }
+@keyframes soonPulse { 50% { opacity: .3; } }
+.soon-title { font-family: var(--display); font-weight: 500; color: var(--cocoa); text-transform: uppercase; letter-spacing: .08em; font-size: clamp(19px, 5.4vw, 24px); line-height: 1.25; margin: 12px 0 0; }
+.soon-hi { font-family: 'Noto Serif Devanagari', 'Tiro Devanagari Hindi', var(--serif); font-size: 15px; line-height: 1.6; color: var(--ink); margin: 8px 0 0; }
+.soon-wa { margin-top: 16px; }
+.soon-phone { margin-top: 10px; font-family: var(--sans); font-size: 18px; font-weight: 500; letter-spacing: .08em; color: var(--cocoa); text-decoration: none; }
+.soon-foot { margin-top: auto; padding-top: 16px; }
+.soon-thanks { font-family: var(--serif); font-style: italic; font-size: 16px; color: var(--muted); }
+.soon-foot .footer-links { margin-top: 6px; }
+@media (prefers-reduced-motion: reduce) { .soon-badge span { animation: none; } }

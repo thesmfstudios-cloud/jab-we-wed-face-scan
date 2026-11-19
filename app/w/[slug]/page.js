@@ -1,6 +1,6 @@
-import { notFound } from 'next/navigation';
 import { Brand, Decor, Footer } from '@/components/Brand';
 import GuestFlow from '@/components/GuestFlow';
+import ComingSoon from '@/components/ComingSoon';
 import { getEventBySlug, isGuestOpen } from '@/lib/server/supabase-admin';
 import { coupleNames, formatDate } from '@/lib/format';
 
@@ -29,7 +29,12 @@ export async function generateMetadata({ params }) {
 export default async function WeddingPage({ params }) {
   const { slug } = await params;
   const event = await load(slug);
-  if (event === null || event?.status === 'draft') notFound();
+  // Gallery not created yet, still a draft, or not opened to guests:
+  // show the "photos coming soon" landing page with the WhatsApp inquiry.
+  if (event === null || event?.status === 'draft' || (event && !isGuestOpen(event) && event.status !== 'archived')) {
+    const ready = event && event.status !== 'draft';
+    return <ComingSoon couple={ready ? coupleNames(event) : ''} date={ready ? formatDate(event.event_date) : ''} />;
+  }
 
   if (event === undefined || !isGuestOpen(event)) {
     const archived = event?.status === 'archived';

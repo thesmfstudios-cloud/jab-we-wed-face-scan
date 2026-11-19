@@ -1,8 +1,11 @@
 import { Brand, CameraRule, Decor, Footer } from '@/components/Brand';
 import { Steps } from '@/components/Steps';
 import { GalleryCodeForm } from '@/components/GalleryCodeForm';
+import ComingSoon from '@/components/ComingSoon';
+import { COMING_SOON } from '@/lib/site-config';
 
 export default function Home() {
+  if (COMING_SOON) return <ComingSoon />;
   return (
     <div className="page">
       <Decor />
