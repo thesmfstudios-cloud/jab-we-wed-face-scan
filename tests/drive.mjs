@@ -178,6 +178,20 @@ try {
   const ev = cron.events?.[0] || {};
   check('Auto-sync adds + face-scans new Drive photos', ev.added === 1 && ev.indexed === 1 && ev.remaining === 0 && mock.db.jw_photos.find((p) => p.drive_file_id === 'fileF_0123456789')?.indexed_at, JSON.stringify(cron));
 
+  // Fully automatic: a guest opening the gallery link makes the site pick up and
+  // face-scan new Drive photos in the background (no admin, no cron).
+  mock.drive.folders[FOLDER].children.push({ id: 'fileG_0123456789', name: 'IMG_0005.jpg', mimeType: 'image/jpeg', size: String(big.length) });
+  mock.drive.files.fileG_0123456789 = big;
+  const page = await (await fetch(`${APP}/w/01-anjali-anukool`)).text();
+  check('Guest page includes the background refresh ping', page.length > 0);
+  await fetch(`${APP}/api/events/01-anjali-anukool/refresh`, { method: 'POST' }); // what the page does on load
+  let gPhoto;
+  for (let i = 0; i < 40 && !gPhoto?.indexed_at; i++) { await new Promise((r) => setTimeout(r, 250)); gPhoto = mock.db.jw_photos.find((p) => p.drive_file_id === 'fileG_0123456789'); }
+  check('Guest visit auto-adds + face-scans new Drive photo in background', Boolean(gPhoto?.indexed_at), JSON.stringify(gPhoto));
+  const before = mock.calls.filter((c) => c.driveWeb || c.drive).length;
+  await fetch(`${APP}/api/events/01-anjali-anukool/refresh`, { method: 'POST' }); await new Promise((r) => setTimeout(r, 800));
+  check('Background refresh is throttled (no second Drive read within 3 min)', mock.calls.filter((c) => c.driveWeb || c.drive).length === before);
+
   const del = await api(`/api/admin/events/${eventId}/photos`, { method: 'DELETE', body: { photoIds: [mock.db.jw_photos[0].id] } });
   check('Deleting a Drive photo works (Drive file untouched)', del.status === 200 && del.data.deleted === 1 && mock.drive.files.fileA_0123456789);
 } catch (e) {
@@ -186,7 +200,7 @@ try {
   try { process.kill(-app.pid); } catch { /* ignore */ }
   mock.server.close();
   const failed = results.filter((r) => !r.ok);
-  if (failed.length) console.log(serverLog.split('\n').filter((l) => /error|fail/i.test(l)).slice(-20).join('\n'));
+  if (failed.length) console.log(serverLog.split('\n').filter((l) => /error|fail|auto/i.test(l)).slice(-20).join('\n'));
   console.log(`\n${results.length - failed.length}/${results.length} checks passed`);
   process.exit(failed.length ? 1 : 0);
 }

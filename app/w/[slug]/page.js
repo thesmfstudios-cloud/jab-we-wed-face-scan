@@ -1,6 +1,7 @@
 import { Brand, Decor, Footer } from '@/components/Brand';
 import GuestFlow from '@/components/GuestFlow';
 import ComingSoon from '@/components/ComingSoon';
+import RefreshPing from '@/components/RefreshPing';
 import { getEventBySlug, isGuestOpen } from '@/lib/server/supabase-admin';
 import { coupleNames, formatDate } from '@/lib/format';
 
@@ -33,7 +34,7 @@ export default async function WeddingPage({ params }) {
   // show the "photos coming soon" landing page with the WhatsApp inquiry.
   if (event === null || event?.status === 'draft' || (event && !isGuestOpen(event) && event.status !== 'archived')) {
     const ready = event && event.status !== 'draft';
-    return <ComingSoon couple={ready ? coupleNames(event) : ''} date={ready ? formatDate(event.event_date) : ''} />;
+    return <><RefreshPing slug={slug} /><ComingSoon couple={ready ? coupleNames(event) : ''} date={ready ? formatDate(event.event_date) : ''} /></>;
   }
 
   if (event === undefined || !isGuestOpen(event)) {
@@ -60,6 +61,8 @@ export default async function WeddingPage({ params }) {
   }
 
   return (
+    <>
+    <RefreshPing slug={event.slug} />
     <GuestFlow
       event={{
         slug: event.slug,
@@ -69,5 +72,6 @@ export default async function WeddingPage({ params }) {
         venue: event.venue || '',
       }}
     />
+    </>
   );
 }

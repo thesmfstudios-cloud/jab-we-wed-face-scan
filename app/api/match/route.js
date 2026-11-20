@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
+import { refreshEventInBackground } from '@/lib/server/auto-refresh';
 import { SearchFacesByImageCommand } from '@aws-sdk/client-rekognition';
 import { getAdminSupabase, getEventBySlug, isGuestOpen, signPaths, BUCKET_PREVIEWS } from '@/lib/server/supabase-admin';
 import { getCollectionId, getRekognitionClient, matchThreshold } from '@/lib/server/rekognition';
@@ -47,6 +48,7 @@ export async function POST(request) {
 
     const supabase = getAdminSupabase();
     const indexIncomplete = Number(event.indexed_count || 0) < Number(event.photos_count || 0);
+    if (indexIncomplete) after(() => refreshEventInBackground(event.id));
 
     let response;
     try {

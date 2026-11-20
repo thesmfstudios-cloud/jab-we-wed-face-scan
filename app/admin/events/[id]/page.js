@@ -76,10 +76,16 @@ function AutoScan({ event, stats, onChange, reload }) {
     // Only on opening the page (the Drive panel runs its own scan after a sync).
     if (ran.current || !stats) return;
     ran.current = true;
-    if (!waiting || (stats.indexErrors || 0) > 0) return;
+    if (!event.drive_folder_id && (!waiting || (stats.indexErrors || 0) > 0)) return;
     (async () => {
       let ev = event, errors = 0;
       try {
+        if (event.drive_folder_id) {
+          setState({ type: 'info', text: 'Checking the Drive folder for new photos…' });
+          const d = await api(`/api/admin/events/${event.id}/drive`, { method: 'POST', body: {} });
+          ev = d.event; onChange(d.event);
+          if (ev.indexed_count >= ev.photos_count) { setState(d.added ? { type: 'ok', text: `${d.added} new photos added.` } : null); return; }
+        }
         for (;;) {
           setState({ type: 'info', text: `Scanning faces of new photos… ${ev.indexed_count}/${ev.photos_count}` });
           const r = await api(`/api/admin/events/${event.id}/index`, { method: 'POST', body: {} });
@@ -328,8 +334,16 @@ function Uploader({ event, onDone }) {
         setProg({ ...p });
       }
       setLog(stopRef.current ? 'Upload paused. Choose the same files again to resume — duplicates are skipped automatically.'
-        : `Done. ${p.uploaded} uploaded, ${p.skipped} duplicates skipped${p.failed ? `, ${p.failed} failed (re-select to retry)` : ''}. Next: build the face index.`);
+        : `Done. ${p.uploaded} uploaded, ${p.skipped} duplicates skipped${p.failed ? `, ${p.failed} failed (re-select to retry)` : ''}.`);
       setFiles([]); if (inputRef.current) inputRef.current.value = '';
+      if (!stopRef.current && p.uploaded) {
+        // Face-scan the new photos straight away.
+        for (;;) {
+          const r = await api(`/api/admin/events/${event.id}/index`, { method: 'POST', body: {} });
+          setLog(r.done ? `✓ ${p.uploaded} photos uploaded and face-scanned. Guests can find them now.` : `Uploaded. Scanning faces… ${r.remaining} left`);
+          if (r.done || r.processed === 0) break;
+        }
+      }
       onDone();
     } catch (e) {
       setLog(`Upload stopped: ${e.message}`);
