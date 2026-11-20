@@ -153,15 +153,26 @@ function Capture({ selfie, setSelfie, consent, setConsent, error, setError, onSc
     }
   };
 
+  // Attach the stream once the <video> element is actually on the page.
+  const attachVideo = useCallback((el) => {
+    videoRef.current = el;
+    if (el && streamRef.current && el.srcObject !== streamRef.current) {
+      el.srcObject = streamRef.current;
+      el.play().catch(() => {});
+    }
+  }, []);
+
   const startCamera = async () => {
     setError('');
-    if (!navigator.mediaDevices?.getUserMedia) { nativeCamRef.current?.click(); return; }
+    // Phones/tablets: the built-in camera app is the most reliable (iPhone
+    // Safari, in-app browsers, QR-scanner views). Desktop: live preview.
+    const touch = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches;
+    if (touch || !navigator.mediaDevices?.getUserMedia) { nativeCamRef.current?.click(); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 1280 } }, audio: false });
       streamRef.current = stream;
       setSelfie((old) => { if (old?.url) URL.revokeObjectURL(old.url); return null; });
       setCameraOn(true);
-      requestAnimationFrame(() => { if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); } });
     } catch (e) {
       const denied = e?.name === 'NotAllowedError' || e?.name === 'SecurityError';
       setError(denied
@@ -172,10 +183,18 @@ function Capture({ selfie, setSelfie, consent, setConsent, error, setError, onSc
 
   const capture = async () => {
     try {
-      const blob = await captureVideoFrame(videoRef.current);
+      const video = videoRef.current;
+      // Give the camera up to 3 s to deliver its first frame.
+      for (let i = 0; i < 30 && video && !video.videoWidth; i++) await new Promise((r) => setTimeout(r, 100));
+      const blob = await captureVideoFrame(video);
       stopCamera();
       await setBlob(blob);
-    } catch (e) { setError(e.message); }
+    } catch {
+      // Live preview didn't work on this device — fall back to the device's own camera.
+      stopCamera();
+      setError('The live camera did not start. Tap “Take selfie” again, or use “Upload photo”.');
+      nativeCamRef.current?.click();
+    }
   };
 
   const onFile = async (e) => {
@@ -199,7 +218,7 @@ function Capture({ selfie, setSelfie, consent, setConsent, error, setError, onSc
           <div className="frame-inner">
             {cameraOn ? (
               <>
-                <video ref={videoRef} className="mirror" playsInline muted autoPlay aria-label="Camera preview" />
+                <video ref={attachVideo} className="mirror" playsInline muted autoPlay aria-label="Camera preview" />
                 <div className="face-guide" aria-hidden="true" />
               </>
             ) : selfie ? (
