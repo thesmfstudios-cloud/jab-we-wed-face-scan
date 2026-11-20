@@ -18,3 +18,5 @@ export async function POST(_request, { params }) {
   } catch { /* never block the guest */ }
   return NextResponse.json({ ok: true });
 }
+
+export const GET = POST;
