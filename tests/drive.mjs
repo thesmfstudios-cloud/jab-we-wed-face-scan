@@ -2,8 +2,10 @@
 // Rekognition / Google Drive API. Exercises the API routes directly.
 //   node tests/drive.mjs            (builds first)
 //   SKIP_BUILD=1 node tests/drive.mjs
-//   DRIVE_MODE=public SKIP_BUILD=1 node tests/drive.mjs   (API-key / public-link mode)
-const PRIVATE = process.env.DRIVE_MODE !== 'public';
+//   DRIVE_MODE=public SKIP_BUILD=1 node tests/drive.mjs   (API-key mode)
+//   DRIVE_MODE=link SKIP_BUILD=1 node tests/drive.mjs     (no setup, "Anyone with the link")
+const MODE = process.env.DRIVE_MODE || 'private';
+const PRIVATE = MODE === 'private';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,7 +61,9 @@ const env = {
   AWS_ACCESS_KEY_ID: 'AKIATEST', AWS_SECRET_ACCESS_KEY: 'secret', AWS_REGION: 'ap-south-1',
   AWS_REKOGNITION_ENDPOINT: `http://127.0.0.1:${MOCK_PORT}`,
   AWS_REKOGNITION_COLLECTION_PREFIX: 'jab-we-wed',
-  ...(PRIVATE ? { GOOGLE_SERVICE_ACCOUNT_JSON: saJson } : { GOOGLE_DRIVE_API_KEY: mock.drive.key }),
+  ...(MODE === 'private' ? { GOOGLE_SERVICE_ACCOUNT_JSON: saJson } : MODE === 'public' ? { GOOGLE_DRIVE_API_KEY: mock.drive.key } : {}),
+  GOOGLE_DRIVE_WEB_BASE: `http://127.0.0.1:${MOCK_PORT}`,
+  GOOGLE_DRIVE_DOWNLOAD_BASE: `http://127.0.0.1:${MOCK_PORT}`,
   GOOGLE_DRIVE_API_BASE: `http://127.0.0.1:${MOCK_PORT}/drive/v3`,
   GOOGLE_OAUTH_TOKEN_URL: `http://127.0.0.1:${MOCK_PORT}/oauth/token`,
 };
@@ -99,7 +103,12 @@ try {
   check('Unknown folder gives a clear error', bad.status === 400 && /not found|share the folder/i.test(bad.data.error || ''), bad.data.error);
 
   const info = await api(`/api/admin/events/${eventId}/drive`);
-  check(`Drive mode reported (${PRIVATE ? 'private' : 'public'})`, info.data.mode === (PRIVATE ? 'private' : 'public') && (!PRIVATE || info.data.shareEmail === SA_EMAIL), JSON.stringify(info.data));
+  check(`Drive mode reported (${MODE})`, info.data.mode === MODE && (!PRIVATE || info.data.shareEmail === SA_EMAIL), JSON.stringify(info.data));
+  if (MODE === 'link') {
+    const notPublic = await api(`/api/admin/events/${eventId}/drive`, { method: 'POST', body: { folder: FOLDER } });
+    check('Folder not shared by link → explains how to share', notPublic.status === 400 && /Anyone with the link/.test(notPublic.data.error || ''), notPublic.data.error);
+    mock.drive.publicFolders.add(FOLDER); mock.drive.publicFolders.add(SUB);
+  }
   if (PRIVATE) {
     const notShared = await api(`/api/admin/events/${eventId}/drive`, { method: 'POST', body: { folder: FOLDER } });
     check('Folder not shared with service account → asks to share with its email', notShared.status === 400 && (notShared.data.error || '').includes(SA_EMAIL), notShared.data.error);
@@ -145,26 +154,20 @@ try {
   const dl = await api('/api/download', { method: 'POST', body: { photoIds: match.data.matches.map((m) => m.id) }, headers: { Authorization: `Bearer ${match.data.token}` } });
   const files = dl.data.files || [];
   const fA = files.find((f) => f.name === 'IMG_0001.jpg');
-  if (PRIVATE) {
-    check('Download returns private app links (no Drive URL, no key)', dl.status === 200 && files.length === 5 && files.every((f) => f.url.startsWith('/api/download/file?t=') && f.fetchUrl.startsWith('/api/download/file?t=')) && !JSON.stringify(files).includes('google'));
-    const r = await fetch(`${APP}${fA.url}`);
-    const got = Buffer.from(await r.arrayBuffer());
-    check('Streams the full-resolution original from private Drive', r.status === 200 && got.equals(big), `${r.status} ${got.length} vs ${big.length}`);
-    check('Download sends attachment filename', /attachment; filename="IMG_0001.jpg"/.test(r.headers.get('content-disposition') || ''));
-    const zipFetch = await fetch(`${APP}${fA.fetchUrl}`);
-    check('ZIP fetch URL works (same origin)', zipFetch.status === 200 && Buffer.from(await zipFetch.arrayBuffer()).equals(big));
-    const t = new URL(fA.url, APP).searchParams.get('t');
-    const otherPhoto = mock.db.jw_photos.find((p) => p.original_filename === 'IMG_0002.jpg').id;
-    const forged = t.replace(/^([^.]+)\.([^.]+)/, (_, s1) => `${s1}.${otherPhoto}`);
-    check('Tampered ticket rejected', (await fetch(`${APP}/api/download/file?t=${encodeURIComponent(forged)}`)).status === 401);
-    check('Missing ticket rejected', (await fetch(`${APP}/api/download/file`)).status === 401);
-    await api(`/api/admin/events/${eventId}`, { method: 'PATCH', body: { guestAccess: false } });
-    check('Closing the gallery blocks existing links', (await fetch(`${APP}${fA.url}`)).status === 401);
-  } else {
-    check('Download returns Drive links', dl.status === 200 && files.length === 5 && files.every((f) => f.url.startsWith('https://drive.usercontent.google.com/download?id=') && f.fetchUrl));
-    const got = Buffer.from(await (await fetch(fA.fetchUrl)).arrayBuffer());
-    check('ZIP fetch URL returns the full-resolution original', got.equals(big), `${got.length} vs ${big.length}`);
-  }
+  check('Download returns website links (no Drive URL, no key)', dl.status === 200 && files.length === 5 && files.every((f) => f.url.startsWith('/api/download/file?t=') && f.fetchUrl.startsWith('/api/download/file?t=')) && !JSON.stringify(files).includes('google'));
+  const r = await fetch(`${APP}${fA.url}`);
+  const got = Buffer.from(await r.arrayBuffer());
+  check('Streams the full-resolution original from Drive via the website', r.status === 200 && got.equals(big), `${r.status} ${got.length} vs ${big.length}`);
+  check('Download sends attachment filename', /attachment; filename="IMG_0001.jpg"/.test(r.headers.get('content-disposition') || ''));
+  const zipFetch = await fetch(`${APP}${fA.fetchUrl}`);
+  check('ZIP fetch URL works (same origin)', zipFetch.status === 200 && Buffer.from(await zipFetch.arrayBuffer()).equals(big));
+  const t = new URL(fA.url, APP).searchParams.get('t');
+  const otherPhoto = mock.db.jw_photos.find((p) => p.original_filename === 'IMG_0002.jpg').id;
+  const forged = t.replace(/^([^.]+)\.([^.]+)/, (_, s1) => `${s1}.${otherPhoto}`);
+  check('Tampered ticket rejected', (await fetch(`${APP}/api/download/file?t=${encodeURIComponent(forged)}`)).status === 401);
+  check('Missing ticket rejected', (await fetch(`${APP}/api/download/file`)).status === 401);
+  await api(`/api/admin/events/${eventId}`, { method: 'PATCH', body: { guestAccess: false } });
+  check('Closing the gallery blocks existing links', (await fetch(`${APP}${fA.url}`)).status === 401);
 
   const del = await api(`/api/admin/events/${eventId}/photos`, { method: 'DELETE', body: { photoIds: [mock.db.jw_photos[0].id] } });
   check('Deleting a Drive photo works (Drive file untouched)', del.status === 200 && del.data.deleted === 1 && mock.drive.files.fileA_0123456789);

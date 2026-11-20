@@ -37,6 +37,11 @@ API: `/api/match`, `/api/download`, `/api/events/[slug]`, `/api/admin/*`.
 
 Each wedding can be linked to a Google Drive folder (Upload tab → *Google Drive folder*).
 
+**No setup (default).** Share the folder as *Anyone with the link* (Viewer) and paste the
+link. With no Google credentials set, the app reads Drive's public folder view
+(`embeddedfolderview`) and public download host. After syncing, the admin runs the face
+index automatically. Guests still download through `/api/download/file` (see below).
+
 **Private folders (recommended, `GOOGLE_SERVICE_ACCOUNT_JSON`).** Create a Google Cloud
 service account, enable the Google Drive API, download its JSON key and paste the whole
 file into this variable. The admin shows the service account's email: share each wedding
@@ -45,8 +50,11 @@ Guests get originals through `/api/download/file`, which streams them from Drive
 a valid face-match session (HMAC ticket, 30 min, gallery must be open). Downloads go
 through Vercel, so they count towards Vercel bandwidth.
 
-**Public-link folders (`GOOGLE_DRIVE_API_KEY`).** Folder shared as *Anyone with the link*;
-guests download straight from Drive. Used only when no service account is set.
+**API key (`GOOGLE_DRIVE_API_KEY`).** Folder shared as *Anyone with the link*; listing
+and downloads use the official Drive API. Used only when no service account is set.
+
+In every mode guests download originals through `/api/download/file` (streamed, so the
+4.5 MB response limit does not apply), which counts towards Vercel bandwidth.
 
 In both modes:
 - JPG/PNG photos in the folder and its sub-folders are added; re-sync adds only new ones.
@@ -105,4 +113,5 @@ rate limits, and the removed payment routes. Screenshots go to `tests/.artifacts
 The mock does not replace a live test against real Supabase and AWS.
 
 `node tests/drive.mjs` tests the Google Drive import the same way (mock Drive API and
-Google OAuth): private service-account mode by default, `DRIVE_MODE=public` for API-key mode.
+Google OAuth): private service-account mode by default, `DRIVE_MODE=public` for API-key
+mode, `DRIVE_MODE=link` for the no-setup public-link mode.

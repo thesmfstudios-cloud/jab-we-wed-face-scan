@@ -192,7 +192,17 @@ function DriveImport({ event, onSynced, goto }) {
     try {
       const d = await api(`/api/admin/events/${event.id}/drive`, { method: 'POST', body: { folder: link.trim() } });
       onSynced(d.event);
-      setMsg({ type: 'ok', text: `“${d.folder.name}”: ${d.found} photos found · ${d.added} new${d.alreadySynced ? ` · ${d.alreadySynced} already added` : ''}.${d.added ? ' Next: build the face index.' : ''}` });
+      const head = `“${d.folder.name}”: ${d.found} photos found · ${d.added} new${d.alreadySynced ? ` · ${d.alreadySynced} already added` : ''}.`;
+      if (d.event.indexed_count >= d.event.photos_count) { setMsg({ type: 'ok', text: `${head} Face index is up to date.` }); return; }
+      // Straight on to the face index (photos → AWS Rekognition), batch by batch.
+      let errors = 0;
+      for (;;) {
+        setMsg({ type: 'info', text: `${head} Scanning faces… ${d.event.indexed_count}/${d.event.photos_count}` });
+        const r = await api(`/api/admin/events/${event.id}/index`, { method: 'POST', body: {} });
+        errors += r.errors; onSynced(r.event); d.event = r.event;
+        if (r.done || r.processed === 0) break;
+      }
+      setMsg({ type: errors ? 'error' : 'ok', text: `${head} ✓ Face scan done: ${d.event.faces_count} faces in ${d.event.indexed_count} photos.${errors ? ` ${errors} photos failed — see the Face index tab.` : ' Next: turn on guest access in Overview.'}` });
     } catch (e) { setMsg({ type: 'error', text: e.message }); }
     finally { setBusy(false); }
   };
@@ -208,10 +218,8 @@ function DriveImport({ event, onSynced, goto }) {
             <button className="btn btn-ghost" onClick={() => { navigator.clipboard?.writeText(info.shareEmail); setCopied(true); setTimeout(() => setCopied(false), 1500); }}><Copy aria-hidden="true" /> {copied ? 'Copied!' : 'Copy email'}</button>
           </div>
         </>
-      ) : info?.mode === 'public' ? (
-        <p className="small muted" style={{ lineHeight: 1.6 }}>Paste the wedding&apos;s Drive folder link (shared as “Anyone with the link can view”).</p>
       ) : info ? (
-        <div className="notice notice-error" style={{ marginTop: 8 }}><span>Google Drive is not connected yet. Add <code>GOOGLE_SERVICE_ACCOUNT_JSON</code> in Vercel and redeploy.{info.error ? ` (${info.error})` : ''}</span></div>
+        <p className="small muted" style={{ lineHeight: 1.6 }}>In Google Drive, set the wedding folder to <b>Share → General access → “Anyone with the link”</b> (Viewer), then paste the folder link below. Guests only get their own matched photos, downloaded through this website.</p>
       ) : null}
       <p className="small muted" style={{ lineHeight: 1.6, marginTop: 8 }}>Originals stay in your Drive at full resolution. Added more photos later? Press Sync again — only new photos are added.</p>
       <div className="row" style={{ marginTop: 12 }}>
@@ -222,7 +230,7 @@ function DriveImport({ event, onSynced, goto }) {
       {event.drive_synced_at && <p className="small muted" style={{ marginTop: 8 }}>Last synced {new Date(event.drive_synced_at).toLocaleString('en-IN')}</p>}
       {msg && <div className={`notice notice-${msg.type}`} style={{ marginTop: 10 }} aria-live="polite">
         <span>{msg.text}</span>
-        {msg.type === 'ok' && <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => goto('Face index')}><ScanFace aria-hidden="true" /> Build face index</button>}
+        {msg.type === 'ok' && <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => goto('Overview')}><ScanFace aria-hidden="true" /> Go to Overview</button>}
       </div>}
     </div>
   );
