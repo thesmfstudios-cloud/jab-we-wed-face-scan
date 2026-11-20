@@ -2,11 +2,22 @@ import { NextResponse } from 'next/server';
 import { getAdminSupabase } from '@/lib/server/supabase-admin';
 import { jsonError, requireAdmin } from '@/lib/server/security';
 import { loadAdminEvent } from '@/lib/server/admin-events';
-import { friendlyDriveError, getDriveFolder, listDriveImages, parseDriveFolderId } from '@/lib/server/google-drive';
+import { driveMode, driveShareEmail, friendlyDriveError, getDriveFolder, listDriveImages, parseDriveFolderId } from '@/lib/server/google-drive';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
+
+/** How Drive is connected, and which email folders must be shared with. */
+export async function GET(request) {
+  const denied = requireAdmin(request);
+  if (denied) return denied;
+  try {
+    return NextResponse.json({ mode: driveMode(), shareEmail: driveShareEmail() });
+  } catch (e) {
+    return NextResponse.json({ mode: null, shareEmail: null, error: e.message });
+  }
+}
 
 /**
  * Connect a Google Drive folder to a wedding and sync its photo list.
@@ -31,7 +42,7 @@ export async function POST(request, { params }) {
       folder = await getDriveFolder(folderId);
       images = await listDriveImages(folderId);
     } catch (e) {
-      return jsonError(friendlyDriveError(e), e?.code === 'DRIVE_NOT_CONFIGURED' ? 503 : 400);
+      return jsonError(friendlyDriveError(e), e?.code === 'DRIVE_NOT_CONFIGURED' || e?.code === 'DRIVE_AUTH_FAILED' ? 503 : 400);
     }
 
     const supabase = getAdminSupabase();

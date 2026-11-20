@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase, isGuestOpen, BUCKET_ORIGINALS } from '@/lib/server/supabase-admin';
-import { jsonError, rateLimit, sha256, UUID_RE } from '@/lib/server/security';
-import { driveGuestUrls } from '@/lib/server/google-drive';
+import { createDownloadTicket, jsonError, rateLimit, sha256, UUID_RE } from '@/lib/server/security';
+import { driveMode, drivePublicUrls } from '@/lib/server/google-drive';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const MAX_PER_REQUEST = 200;
 const SIGNED_SECONDS = 5 * 60;
+const DRIVE_TICKET_SECONDS = 30 * 60; // ZIPs fetch photos one after another
 
 function downloadName(name, fallback) {
   const clean = String(name || '').replace(/[\\/:*?"<>|\r\n]+/g, '_').replace(/^\.+/, '').trim();
@@ -63,12 +64,20 @@ export async function POST(request) {
 
     const byId = new Map((photos || []).map((p) => [p.id, p]));
     const files = [];
+    const privateDrive = (photos || []).some((p) => p.drive_file_id) && driveMode() === 'private';
     for (let i = 0; i < requested.length; i += 20) {
       const chunk = requested.slice(i, i + 20).map((id) => byId.get(id)).filter(Boolean);
       const signed = await Promise.all(chunk.map(async (p, j) => {
         const name = downloadName(p.original_filename, `wedding-photo-${i + j + 1}.jpg`);
         // Google Drive originals are downloaded straight from Drive.
-        if (p.drive_file_id) return { id: p.id, name, bytes: p.bytes || null, ...driveGuestUrls(p.drive_file_id) };
+        if (p.drive_file_id) {
+          if (privateDrive) {
+            // Private Drive: this app streams the original after checking the ticket.
+            const t = encodeURIComponent(createDownloadTicket(session.id, p.id, DRIVE_TICKET_SECONDS));
+            return { id: p.id, name, bytes: p.bytes || null, url: `/api/download/file?t=${t}&dl=1`, fetchUrl: `/api/download/file?t=${t}` };
+          }
+          return { id: p.id, name, bytes: p.bytes || null, ...drivePublicUrls(p.drive_file_id) };
+        }
         const { data, error } = await supabase.storage.from(BUCKET_ORIGINALS).createSignedUrl(p.original_path, SIGNED_SECONDS, { download: name });
         if (error) throw error;
         return { id: p.id, name, bytes: p.bytes || null, url: data.signedUrl };

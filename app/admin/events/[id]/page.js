@@ -182,6 +182,9 @@ function DriveImport({ event, onSynced, goto }) {
   const [link, setLink] = useState(saved);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState(null); // { type, text }
+  const [info, setInfo] = useState(null); // { mode, shareEmail }
+  const [copied, setCopied] = useState(false);
+  useEffect(() => { api(`/api/admin/events/${event.id}/drive`).then(setInfo).catch(() => setInfo({ mode: null })); }, [event.id]);
 
   const sync = async () => {
     if (!link.trim() || busy) return;
@@ -197,7 +200,20 @@ function DriveImport({ event, onSynced, goto }) {
   return (
     <div className="panel">
       <h2><Cloud aria-hidden="true" style={{ verticalAlign: '-4px', marginRight: 6 }} />Google Drive folder</h2>
-      <p className="small muted" style={{ lineHeight: 1.6 }}>Paste the wedding&apos;s Drive folder link (shared as “Anyone with the link can view”). Photos stay in your Drive at full resolution — guests download them straight from Drive. Added more photos to the folder later? Just press Sync again; only new photos are added.</p>
+      {info?.mode === 'private' ? (
+        <>
+          <p className="small muted" style={{ lineHeight: 1.6 }}>Your folder stays <b>private</b>. In Google Drive, share the wedding folder with this email as <b>Viewer</b> (just like sharing with a person), then paste the folder link below.</p>
+          <div className="row" style={{ marginTop: 8 }}>
+            <code className="small" style={{ wordBreak: 'break-all', background: '#fbf3ec', padding: '8px 10px', borderRadius: 8, flex: 1, minWidth: 200 }}>{info.shareEmail}</code>
+            <button className="btn btn-ghost" onClick={() => { navigator.clipboard?.writeText(info.shareEmail); setCopied(true); setTimeout(() => setCopied(false), 1500); }}><Copy aria-hidden="true" /> {copied ? 'Copied!' : 'Copy email'}</button>
+          </div>
+        </>
+      ) : info?.mode === 'public' ? (
+        <p className="small muted" style={{ lineHeight: 1.6 }}>Paste the wedding&apos;s Drive folder link (shared as “Anyone with the link can view”).</p>
+      ) : info ? (
+        <div className="notice notice-error" style={{ marginTop: 8 }}><span>Google Drive is not connected yet. Add <code>GOOGLE_SERVICE_ACCOUNT_JSON</code> in Vercel and redeploy.{info.error ? ` (${info.error})` : ''}</span></div>
+      ) : null}
+      <p className="small muted" style={{ lineHeight: 1.6, marginTop: 8 }}>Originals stay in your Drive at full resolution. Added more photos later? Press Sync again — only new photos are added.</p>
       <div className="row" style={{ marginTop: 12 }}>
         <input className="input" style={{ flex: 1, minWidth: 220 }} value={link} onChange={(e) => setLink(e.target.value)}
           placeholder="https://drive.google.com/drive/folders/…" aria-label="Google Drive folder link" />

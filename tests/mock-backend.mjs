@@ -268,19 +268,36 @@ export function createMockBackend() {
   }
 
   // Google Drive v3 (API key) mock: drive.folders[id] = { name, children: [{id,name,mimeType,size}] }, drive.files[id] = Buffer
-  const drive = { key: 'test-drive-key', folders: {}, files: {}, meta: {} };
+  // Private mode: a service account (drive.saPublicKey) gets a bearer token from
+  // /oauth/token; it can only see folders listed in drive.sharedWithSa.
+  const drive = { key: 'test-drive-key', folders: {}, files: {}, meta: {}, saPublicKey: null, sharedWithSa: new Set(), tokens: new Set() };
+  function oauthToken(req, res, body) {
+    const form = new URLSearchParams(body.toString());
+    const [h, p, sig] = String(form.get('assertion') || '').split('.');
+    const okSig = drive.saPublicKey && sig && crypto.createVerify('RSA-SHA256').update(`${h}.${p}`).verify(drive.saPublicKey, sig, 'base64url');
+    const claims = JSON.parse(Buffer.from(p || 'e30', 'base64url').toString());
+    if (!okSig || !/drive\.readonly/.test(claims.scope || '')) return send(res, 400, { error: 'invalid_grant', error_description: 'Invalid JWT Signature.' });
+    const token = `ya29.${crypto.randomUUID()}`;
+    drive.tokens.add(token);
+    return send(res, 200, { access_token: token, expires_in: 3599, token_type: 'Bearer' });
+  }
   function driveApi(req, res, url) {
     calls.push({ drive: url.pathname, q: url.searchParams.get('q') });
-    if (url.searchParams.get('key') !== drive.key) return send(res, 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }, { 'Access-Control-Allow-Origin': '*' });
     const cors = { 'Access-Control-Allow-Origin': '*' };
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer /, '');
+    const viaSa = drive.tokens.has(bearer);
+    if (!viaSa && url.searchParams.get('key') !== drive.key) return send(res, viaSa || bearer ? 401 : 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }, cors);
+    // A service account only sees folders shared with it (and files inside them).
+    const visible = (id) => !viaSa || drive.sharedWithSa.has(id) || Object.entries(drive.folders).some(([fid, f]) => drive.sharedWithSa.has(fid) && f.children.some((c) => c.id === id || (drive.folders[c.id] && drive.folders[c.id].children.some((g) => g.id === id))));
     const p = url.pathname.replace('/drive/v3/files', '');
     if (!p) {
       const q = url.searchParams.get('q') || '';
       const parent = (q.match(/'([^']+)' in parents/) || [])[1];
-      const f = drive.folders[parent];
+      const f = visible(parent) && drive.folders[parent];
       return f ? send(res, 200, { files: f.children }, cors) : send(res, 404, { error: { code: 404, message: 'File not found' } }, cors);
     }
     const id = decodeURIComponent(p.slice(1));
+    if (!visible(id)) return send(res, 404, { error: { code: 404, message: `File not found: ${id}.` } }, cors);
     if (url.searchParams.get('alt') === 'media') {
       return drive.files[id] ? send(res, 200, drive.files[id], { 'Content-Type': 'image/jpeg', ...cors }) : send(res, 404, { error: { code: 404, message: 'File not found' } }, cors);
     }
@@ -301,6 +318,7 @@ export function createMockBackend() {
       if (url.pathname.startsWith('/rest/v1/')) return rest(req, res, url, body);
       if (url.pathname.startsWith('/storage/v1/')) return storageApi(req, res, url, body, base);
       if (url.pathname.startsWith('/drive/v3/files')) return driveApi(req, res, url);
+      if (url.pathname === '/oauth/token') return oauthToken(req, res, body);
       send(res, 404, { message: 'unknown' });
     } catch (e) {
       console.error('[mock]', e);

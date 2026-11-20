@@ -37,15 +37,22 @@ API: `/api/match`, `/api/download`, `/api/events/[slug]`, `/api/admin/*`.
 
 Each wedding can be linked to a Google Drive folder (Upload tab → *Google Drive folder*).
 
-- Share the folder as **Anyone with the link can view**, paste the link, press **Connect & sync**.
-  JPG/PNG photos in the folder and its sub-folders are added; re-sync adds only new ones.
-- **Face index** then fetches each Drive photo once on the server, stores only a small
-  preview (≤1600 px, ≤900 KB) in `jw-previews`, and indexes its faces. Originals are **not**
-  copied to Supabase.
-- Guests download full-resolution originals straight from Drive
-  (`drive.usercontent.google.com` for single photos; the Drive API media URL for ZIPs).
-- Needs `GOOGLE_DRIVE_API_KEY` (an API key restricted to the Google Drive API) and
-  `supabase/migrations/002_google_drive.sql`.
+**Private folders (recommended, `GOOGLE_SERVICE_ACCOUNT_JSON`).** Create a Google Cloud
+service account, enable the Google Drive API, download its JSON key and paste the whole
+file into this variable. The admin shows the service account's email: share each wedding
+folder with it as **Viewer**, paste the folder link, press **Connect & sync**.
+Guests get originals through `/api/download/file`, which streams them from Drive only for
+a valid face-match session (HMAC ticket, 30 min, gallery must be open). Downloads go
+through Vercel, so they count towards Vercel bandwidth.
+
+**Public-link folders (`GOOGLE_DRIVE_API_KEY`).** Folder shared as *Anyone with the link*;
+guests download straight from Drive. Used only when no service account is set.
+
+In both modes:
+- JPG/PNG photos in the folder and its sub-folders are added; re-sync adds only new ones.
+- **Face index** fetches each Drive photo once on the server, stores only a small preview
+  (≤1600 px, ≤900 KB) in `jw-previews`, and indexes its faces. Originals are **not** copied.
+- Needs `supabase/migrations/002_google_drive.sql`.
 - Deleting a photo in the admin removes it from the portal only; the Drive file stays.
 
 ## Security model
@@ -76,7 +83,8 @@ Each wedding can be linked to a Google Drive folder (Upload tab → *Google Driv
 | `AWS_REGION` | server | e.g. `ap-south-1` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | server, sensitive | Dedicated IAM user |
 | `AWS_REKOGNITION_COLLECTION_PREFIX` | server | `jab-we-wed` (must differ from `smf-face`) |
-| `GOOGLE_DRIVE_API_KEY` | server | Google Drive import; key restricted to Google Drive API |
+| `GOOGLE_SERVICE_ACCOUNT_JSON` | server, sensitive | Private Drive folders: whole service-account JSON key |
+| `GOOGLE_DRIVE_API_KEY` | server | Public-link Drive folders only |
 | `MATCH_SIMILARITY_THRESHOLD` | optional | Default 80 (70–99.5) |
 | `DOWNLOAD_SESSION_MINUTES` | optional | Default 120 |
 | `MATCH_RATE_LIMIT` | optional | Scans per IP per 10 min, default 12 |
@@ -96,5 +104,5 @@ with byte-for-byte original checks, event isolation, token tampering, expiry,
 rate limits, and the removed payment routes. Screenshots go to `tests/.artifacts/`.
 The mock does not replace a live test against real Supabase and AWS.
 
-`node tests/drive.mjs` tests the Google Drive import the same way (mock Drive API):
-sync, sub-folders, re-sync, server-side previews, indexing, matching and Drive downloads.
+`node tests/drive.mjs` tests the Google Drive import the same way (mock Drive API and
+Google OAuth): private service-account mode by default, `DRIVE_MODE=public` for API-key mode.
