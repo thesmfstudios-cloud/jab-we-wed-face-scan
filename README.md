@@ -63,6 +63,15 @@ In both modes:
 - Needs `supabase/migrations/002_google_drive.sql`.
 - Deleting a photo in the admin removes it from the portal only; the Drive file stays.
 
+## Branded downloads
+
+With `FRAME_DOWNLOADS` (in `lib/site-config.js`) on, every guest download is delivered in
+the Jab We Wed frame: ivory mount, terracotta keyline and corner marks, couple names and
+date, the *jab ♡ we wed..* signature and `@jabwewed.in` (`lib/server/frame.js`, fonts in
+`assets/fonts`, SIL OFL). The photo keeps its full resolution; the file is re-encoded as
+JPEG (quality 92) and named `<original>-jab-we-wed.jpg`. All downloads then go through
+`/api/download/file`.
+
 ## Security model
 
 - Guests never get table or storage access. RLS is on with no anon policies; all access goes through server routes that use the service role.

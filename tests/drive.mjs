@@ -154,14 +154,15 @@ try {
 
   const dl = await api('/api/download', { method: 'POST', body: { photoIds: match.data.matches.map((m) => m.id) }, headers: { Authorization: `Bearer ${match.data.token}` } });
   const files = dl.data.files || [];
-  const fA = files.find((f) => f.name === 'IMG_0001.jpg');
+  const fA = files.find((f) => f.name === 'IMG_0001-jab-we-wed.jpg');
   check('Download returns website links (no Drive URL, no key)', dl.status === 200 && files.length === 5 && files.every((f) => f.url.startsWith('/api/download/file?t=') && f.fetchUrl.startsWith('/api/download/file?t=')) && !JSON.stringify(files).includes('google'));
   const r = await fetch(`${APP}${fA.url}`);
   const got = Buffer.from(await r.arrayBuffer());
-  check('Streams the full-resolution original from Drive via the website', r.status === 200 && got.equals(big), `${r.status} ${got.length} vs ${big.length}`);
-  check('Download sends attachment filename', /attachment; filename="IMG_0001.jpg"/.test(r.headers.get('content-disposition') || ''));
+  const meta = r.status === 200 ? await sharp(got).metadata() : {};
+  check('Streams the full-resolution photo in the Jab We Wed frame', r.status === 200 && meta.format === 'jpeg' && meta.width === 6000 + 2 * Math.round(4000 * 0.05) && meta.height === 4000 + Math.round(4000 * 0.05) + Math.round(4000 * 0.17), `${r.status} ${meta.width}x${meta.height}`);
+  check('Download sends attachment filename', /attachment; filename="IMG_0001-jab-we-wed.jpg"/.test(r.headers.get('content-disposition') || ''), r.headers.get('content-disposition'));
   const zipFetch = await fetch(`${APP}${fA.fetchUrl}`);
-  check('ZIP fetch URL works (same origin)', zipFetch.status === 200 && Buffer.from(await zipFetch.arrayBuffer()).equals(big));
+  check('ZIP fetch URL works (same origin)', zipFetch.status === 200 && (await sharp(Buffer.from(await zipFetch.arrayBuffer())).metadata()).width === meta.width);
   const t = new URL(fA.url, APP).searchParams.get('t');
   const otherPhoto = mock.db.jw_photos.find((p) => p.original_filename === 'IMG_0002.jpg').id;
   const forged = t.replace(/^([^.]+)\.([^.]+)/, (_, s1) => `${s1}.${otherPhoto}`);

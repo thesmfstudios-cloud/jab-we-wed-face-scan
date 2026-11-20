@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase, isGuestOpen, BUCKET_ORIGINALS } from '@/lib/server/supabase-admin';
+import { FRAME_DOWNLOADS } from '@/lib/site-config';
+import { framedName } from '@/lib/server/frame';
 import { createDownloadTicket, jsonError, rateLimit, sha256, UUID_RE } from '@/lib/server/security';
 
 export const runtime = 'nodejs';
@@ -7,7 +9,7 @@ export const dynamic = 'force-dynamic';
 
 const MAX_PER_REQUEST = 200;
 const SIGNED_SECONDS = 5 * 60;
-const DRIVE_TICKET_SECONDS = 30 * 60; // ZIPs fetch photos one after another
+const TICKET_SECONDS = 30 * 60; // ZIPs fetch photos one after another
 
 function downloadName(name, fallback) {
   const clean = String(name || '').replace(/[\\/:*?"<>|\r\n]+/g, '_').replace(/^\.+/, '').trim();
@@ -66,11 +68,12 @@ export async function POST(request) {
     for (let i = 0; i < requested.length; i += 20) {
       const chunk = requested.slice(i, i + 20).map((id) => byId.get(id)).filter(Boolean);
       const signed = await Promise.all(chunk.map(async (p, j) => {
-        const name = downloadName(p.original_filename, `wedding-photo-${i + j + 1}.jpg`);
-        // Google Drive originals are downloaded straight from Drive.
-        if (p.drive_file_id) {
-          // Google Drive original: streamed by this app after checking the ticket.
-          const t = encodeURIComponent(createDownloadTicket(session.id, p.id, DRIVE_TICKET_SECONDS));
+        const raw = downloadName(p.original_filename, `wedding-photo-${i + j + 1}.jpg`);
+        const name = FRAME_DOWNLOADS ? framedName(raw) : raw;
+        // Framed photos and Google Drive originals are streamed by this app
+        // after checking the ticket.
+        if (FRAME_DOWNLOADS || p.drive_file_id) {
+          const t = encodeURIComponent(createDownloadTicket(session.id, p.id, TICKET_SECONDS));
           return { id: p.id, name, bytes: p.bytes || null, url: `/api/download/file?t=${t}&dl=1`, fetchUrl: `/api/download/file?t=${t}` };
         }
         const { data, error } = await supabase.storage.from(BUCKET_ORIGINALS).createSignedUrl(p.original_path, SIGNED_SECONDS, { download: name });
