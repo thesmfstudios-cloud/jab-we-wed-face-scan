@@ -10,6 +10,8 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
+  // Fonts for the branded download frame (read from disk by sharp).
+  outputFileTracingIncludes: { '/api/download/file': ['./assets/fonts/**'], '/api/frame-check': ['./assets/fonts/**'] },
   async headers() {
     return [
       { source: '/:path*', headers: securityHeaders },
