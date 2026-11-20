@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { getAdminSupabase, isGuestOpen, BUCKET_ORIGINALS } from '@/lib/server/supabase-admin';
 import { jsonError, rateLimit, sha256, UUID_RE } from '@/lib/server/security';
+import { driveGuestUrls } from '@/lib/server/google-drive';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -55,7 +56,7 @@ export async function POST(request) {
 
     const { data: photos, error: photoError } = await supabase
       .from('jw_photos')
-      .select('id,original_path,original_filename,bytes')
+      .select('id,original_path,original_filename,bytes,drive_file_id')
       .eq('event_id', session.event_id)
       .in('id', requested);
     if (photoError) throw photoError;
@@ -66,6 +67,8 @@ export async function POST(request) {
       const chunk = requested.slice(i, i + 20).map((id) => byId.get(id)).filter(Boolean);
       const signed = await Promise.all(chunk.map(async (p, j) => {
         const name = downloadName(p.original_filename, `wedding-photo-${i + j + 1}.jpg`);
+        // Google Drive originals are downloaded straight from Drive.
+        if (p.drive_file_id) return { id: p.id, name, bytes: p.bytes || null, ...driveGuestUrls(p.drive_file_id) };
         const { data, error } = await supabase.storage.from(BUCKET_ORIGINALS).createSignedUrl(p.original_path, SIGNED_SECONDS, { download: name });
         if (error) throw error;
         return { id: p.id, name, bytes: p.bytes || null, url: data.signedUrl };

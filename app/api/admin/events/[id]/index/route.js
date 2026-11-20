@@ -4,12 +4,15 @@ import { getAdminSupabase, BUCKET_PREVIEWS } from '@/lib/server/supabase-admin';
 import { getCollectionId, getRekognitionClient } from '@/lib/server/rekognition';
 import { jsonError, requireAdmin } from '@/lib/server/security';
 import { loadAdminEvent } from '@/lib/server/admin-events';
+import { downloadDriveFile, friendlyDriveError } from '@/lib/server/google-drive';
+import { makeServerPreview } from '@/lib/server/preview';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const BATCH = 8;
+const DRIVE_BATCH = 4; // Drive originals are full size; keep each call well under the time limit.
 
 async function ensureCollection(client, collectionId) {
   try {
@@ -43,15 +46,18 @@ export async function POST(request, { params }) {
     const supabase = getAdminSupabase();
     let query = supabase
       .from('jw_photos')
-      .select('id,preview_path')
+      .select('id,preview_path,drive_file_id,processing_status')
       .eq('event_id', event.id)
-      .eq('processing_status', 'ready')
+      .in('processing_status', ['ready', 'pending'])
       .is('indexed_at', null)
       .order('created_at', { ascending: true })
       .limit(BATCH);
     if (!retryFailed) query = query.is('index_error', null);
-    const { data: photos, error } = await query;
+    const { data: rows, error } = await query;
     if (error) throw error;
+    // Cap Drive photos per call (each one is a full-size download).
+    let driveSlots = DRIVE_BATCH;
+    const photos = (rows || []).filter((p) => p.processing_status !== 'pending' || driveSlots-- > 0);
 
     const client = getRekognitionClient();
     const collectionId = getCollectionId(event.id);
@@ -59,11 +65,25 @@ export async function POST(request, { params }) {
 
     const results = await Promise.all((photos || []).map(async (photo) => {
       try {
-        const { data: file, error: dlError } = await supabase.storage.from(BUCKET_PREVIEWS).download(photo.preview_path);
-        if (dlError || !file) throw new Error(dlError?.message || 'Preview missing.');
+        let bytes;
+        if (photo.processing_status === 'pending') {
+          // Google Drive photo: fetch the original once, keep only a small preview.
+          if (!photo.drive_file_id) throw new Error('Photo has no source.');
+          let original;
+          try { original = await downloadDriveFile(photo.drive_file_id); } catch (e) { throw new Error(friendlyDriveError(e)); }
+          bytes = await makeServerPreview(original);
+          const { error: upError } = await supabase.storage.from(BUCKET_PREVIEWS)
+            .upload(photo.preview_path, bytes, { contentType: 'image/jpeg', upsert: true });
+          if (upError) throw new Error(upError.message);
+          await supabase.from('jw_photos').update({ processing_status: 'ready', bytes: original.length }).eq('id', photo.id);
+        } else {
+          const { data: file, error: dlError } = await supabase.storage.from(BUCKET_PREVIEWS).download(photo.preview_path);
+          if (dlError || !file) throw new Error(dlError?.message || 'Preview missing.');
+          bytes = Buffer.from(await file.arrayBuffer());
+        }
         const indexed = await client.send(new IndexFacesCommand({
           CollectionId: collectionId,
-          Image: { Bytes: Buffer.from(await file.arrayBuffer()) },
+          Image: { Bytes: bytes },
           ExternalImageId: photo.id,
           // NONE (as in the live Face Match indexer) keeps small/background
           // faces from group shots so guests are found in them too.
@@ -82,7 +102,7 @@ export async function POST(request, { params }) {
 
     await supabase.rpc('jw_refresh_event_counts', { p_event_id: event.id });
     let remainingQuery = supabase.from('jw_photos').select('id', { count: 'exact', head: true })
-      .eq('event_id', event.id).eq('processing_status', 'ready').is('indexed_at', null);
+      .eq('event_id', event.id).in('processing_status', ['ready', 'pending']).is('indexed_at', null);
     if (!retryFailed) remainingQuery = remainingQuery.is('index_error', null);
     const { count: remaining } = await remainingQuery;
     const fresh = await loadAdminEvent(event.id);

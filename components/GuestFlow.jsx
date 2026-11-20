@@ -348,7 +348,7 @@ function Results({ event, result, onRestart }) {
     try {
       setJob({ label: 'Preparing photo', done: 0, total: 1 });
       const [file] = await authorize([id]);
-      const blob = await (await fetch(file.url)).blob();
+      const blob = await (await fetch(file.fetchUrl || file.url)).blob();
       const f = new File([blob], file.name, { type: blob.type || 'image/jpeg' });
       setJob(null);
       if (navigator.canShare?.({ files: [f] })) await navigator.share({ files: [f], title: `${event.couple} wedding` });

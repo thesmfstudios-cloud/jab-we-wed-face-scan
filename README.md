@@ -33,6 +33,21 @@ Vercel project. The original app is not touched.
 
 API: `/api/match`, `/api/download`, `/api/events/[slug]`, `/api/admin/*`.
 
+## Google Drive folders
+
+Each wedding can be linked to a Google Drive folder (Upload tab → *Google Drive folder*).
+
+- Share the folder as **Anyone with the link can view**, paste the link, press **Connect & sync**.
+  JPG/PNG photos in the folder and its sub-folders are added; re-sync adds only new ones.
+- **Face index** then fetches each Drive photo once on the server, stores only a small
+  preview (≤1600 px, ≤900 KB) in `jw-previews`, and indexes its faces. Originals are **not**
+  copied to Supabase.
+- Guests download full-resolution originals straight from Drive
+  (`drive.usercontent.google.com` for single photos; the Drive API media URL for ZIPs).
+- Needs `GOOGLE_DRIVE_API_KEY` (an API key restricted to the Google Drive API) and
+  `supabase/migrations/002_google_drive.sql`.
+- Deleting a photo in the admin removes it from the portal only; the Drive file stays.
+
 ## Security model
 
 - Guests never get table or storage access. RLS is on with no anon policies; all access goes through server routes that use the service role.
@@ -43,7 +58,7 @@ API: `/api/match`, `/api/download`, `/api/events/[slug]`, `/api/admin/*`.
 
 ## Setup
 
-1. **Supabase (new project).** Run `supabase/migrations/001_jab_we_wed.sql`. It creates the tables, functions, and the private buckets `jw-originals` (50 MB/file) and `jw-previews`.
+1. **Supabase (new project).** Run `supabase/migrations/001_jab_we_wed.sql`, then `002_google_drive.sql`. It creates the tables, functions, and the private buckets `jw-originals` (50 MB/file) and `jw-previews`.
 2. **AWS.** Create a dedicated IAM user with only these permissions: `rekognition:CreateCollection`, `DescribeCollection`, `DeleteCollection`, `IndexFaces`, `SearchFacesByImage`, `DeleteFaces`, on `arn:aws:rekognition:<region>:<acct>:collection/jab-we-wed-*`.
 3. **Vercel.** Set the variables from `.env.example`, then deploy.
 4. Open `/admin` → New wedding → Upload → Face index → Overview: turn on *Gallery published* and *Guests can scan & download* → download the QR.
@@ -61,6 +76,7 @@ API: `/api/match`, `/api/download`, `/api/events/[slug]`, `/api/admin/*`.
 | `AWS_REGION` | server | e.g. `ap-south-1` |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | server, sensitive | Dedicated IAM user |
 | `AWS_REKOGNITION_COLLECTION_PREFIX` | server | `jab-we-wed` (must differ from `smf-face`) |
+| `GOOGLE_DRIVE_API_KEY` | server | Google Drive import; key restricted to Google Drive API |
 | `MATCH_SIMILARITY_THRESHOLD` | optional | Default 80 (70–99.5) |
 | `DOWNLOAD_SESSION_MINUTES` | optional | Default 120 |
 | `MATCH_RATE_LIMIT` | optional | Scans per IP per 10 min, default 12 |
@@ -79,3 +95,6 @@ uploads, duplicates, indexing, QR, camera, matching, single/selected/all ZIP dow
 with byte-for-byte original checks, event isolation, token tampering, expiry,
 rate limits, and the removed payment routes. Screenshots go to `tests/.artifacts/`.
 The mock does not replace a live test against real Supabase and AWS.
+
+`node tests/drive.mjs` tests the Google Drive import the same way (mock Drive API):
+sync, sub-folders, re-sync, server-side previews, indexing, matching and Drive downloads.

@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { QRCodeCanvas, QRCodeSVG } from 'qrcode.react';
 import {
-  ArrowLeft, Archive, Copy, Download, ExternalLink, ImagePlus, Loader2, Play, RefreshCw, Save, ScanFace, Square, Trash2, Upload,
+  ArrowLeft, Archive, Cloud, Copy, Download, ExternalLink, ImagePlus, Loader2, Play, RefreshCw, Save, ScanFace, Square, Trash2, Upload,
 } from 'lucide-react';
 import AdminShell from '@/components/admin/AdminShell';
 import { StatusPill } from '@/components/admin/StatusPill';
@@ -58,7 +58,7 @@ function EventAdmin() {
       {error && <div className="notice notice-error" style={{ marginBottom: 14 }}>{error}</div>}
 
       {tab === 'Overview' && <Overview event={event} stats={stats} patch={patch} goto={setTab} />}
-      {tab === 'Upload' && <Uploader event={event} onDone={reload} />}
+      {tab === 'Upload' && <><DriveImport event={event} onSynced={(ev) => setEvent(ev)} goto={setTab} /><Uploader event={event} onDone={reload} /></>}
       {tab === 'Face index' && <Indexer event={event} stats={stats} onChange={(ev) => setEvent(ev)} reload={reload} />}
       {tab === 'Library' && <Library event={event} onChange={reload} />}
       {tab === 'Settings' && <Settings event={event} patch={patch} onDeleted={reload} />}
@@ -172,6 +172,42 @@ function QrPanel({ event }) {
       </div>
       <div ref={canvasWrap} hidden><QRCodeCanvas value={url} size={2048} level="H" fgColor="#000000" bgColor="#ffffff" marginSize={4} /></div>
       <div ref={svgWrap} hidden><QRCodeSVG value={url} size={1024} level="H" fgColor="#000000" bgColor="#ffffff" marginSize={4} /></div>
+    </div>
+  );
+}
+
+/* ───────────── Google Drive folder import ───────────── */
+function DriveImport({ event, onSynced, goto }) {
+  const saved = event.drive_folder_id ? `https://drive.google.com/drive/folders/${event.drive_folder_id}` : '';
+  const [link, setLink] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState(null); // { type, text }
+
+  const sync = async () => {
+    if (!link.trim() || busy) return;
+    setBusy(true); setMsg({ type: 'info', text: 'Reading the Drive folder…' });
+    try {
+      const d = await api(`/api/admin/events/${event.id}/drive`, { method: 'POST', body: { folder: link.trim() } });
+      onSynced(d.event);
+      setMsg({ type: 'ok', text: `“${d.folder.name}”: ${d.found} photos found · ${d.added} new${d.alreadySynced ? ` · ${d.alreadySynced} already added` : ''}.${d.added ? ' Next: build the face index.' : ''}` });
+    } catch (e) { setMsg({ type: 'error', text: e.message }); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="panel">
+      <h2><Cloud aria-hidden="true" style={{ verticalAlign: '-4px', marginRight: 6 }} />Google Drive folder</h2>
+      <p className="small muted" style={{ lineHeight: 1.6 }}>Paste the wedding&apos;s Drive folder link (shared as “Anyone with the link can view”). Photos stay in your Drive at full resolution — guests download them straight from Drive. Added more photos to the folder later? Just press Sync again; only new photos are added.</p>
+      <div className="row" style={{ marginTop: 12 }}>
+        <input className="input" style={{ flex: 1, minWidth: 220 }} value={link} onChange={(e) => setLink(e.target.value)}
+          placeholder="https://drive.google.com/drive/folders/…" aria-label="Google Drive folder link" />
+        <button className="btn btn-primary" disabled={!link.trim() || busy} onClick={sync}>{busy ? <Loader2 className="spin" aria-hidden="true" /> : <RefreshCw aria-hidden="true" />} {saved ? 'Sync now' : 'Connect & sync'}</button>
+      </div>
+      {event.drive_synced_at && <p className="small muted" style={{ marginTop: 8 }}>Last synced {new Date(event.drive_synced_at).toLocaleString('en-IN')}</p>}
+      {msg && <div className={`notice notice-${msg.type}`} style={{ marginTop: 10 }} aria-live="polite">
+        <span>{msg.text}</span>
+        {msg.type === 'ok' && <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => goto('Face index')}><ScanFace aria-hidden="true" /> Build face index</button>}
+      </div>}
     </div>
   );
 }

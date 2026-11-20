@@ -70,7 +70,7 @@ export function createMockBackend() {
     const ev = db.jw_events.find((e) => e.id === eventId);
     if (!ev) return;
     const ps = db.jw_photos.filter((p) => p.event_id === eventId);
-    ev.photos_count = ps.filter((p) => p.processing_status === 'ready').length;
+    ev.photos_count = ps.filter((p) => ['ready', 'pending'].includes(p.processing_status)).length;
     ev.indexed_count = ps.filter((p) => p.indexed_at).length;
     ev.faces_count = ps.reduce((s, p) => s + (p.face_count || 0), 0);
   }
@@ -190,6 +190,11 @@ export function createMockBackend() {
       uploadTokens.delete(url.searchParams.get('token'));
       return send(res, 200, { Key: key });
     }
+    if ((req.method === 'POST' || req.method === 'PUT') && (m = p.match(/^object\/(?!sign\/|upload\/|public\/|authenticated\/)([^/]+)\/(.+)$/))) {
+      if (!String(req.headers.authorization || '').includes(base.serviceKey)) return send(res, 403, { message: 'forbidden' });
+      storage.set(`${m[1]}/${m[2]}`, body);
+      return send(res, 200, { Key: `${m[1]}/${m[2]}` });
+    }
     if (req.method === 'POST' && (m = p.match(/^object\/sign\/([^/]+)$/))) {
       const { paths, expiresIn } = JSON.parse(body.toString());
       return send(res, 200, paths.map((path) => {
@@ -262,6 +267,28 @@ export function createMockBackend() {
     }
   }
 
+  // Google Drive v3 (API key) mock: drive.folders[id] = { name, children: [{id,name,mimeType,size}] }, drive.files[id] = Buffer
+  const drive = { key: 'test-drive-key', folders: {}, files: {}, meta: {} };
+  function driveApi(req, res, url) {
+    calls.push({ drive: url.pathname, q: url.searchParams.get('q') });
+    if (url.searchParams.get('key') !== drive.key) return send(res, 400, { error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }, { 'Access-Control-Allow-Origin': '*' });
+    const cors = { 'Access-Control-Allow-Origin': '*' };
+    const p = url.pathname.replace('/drive/v3/files', '');
+    if (!p) {
+      const q = url.searchParams.get('q') || '';
+      const parent = (q.match(/'([^']+)' in parents/) || [])[1];
+      const f = drive.folders[parent];
+      return f ? send(res, 200, { files: f.children }, cors) : send(res, 404, { error: { code: 404, message: 'File not found' } }, cors);
+    }
+    const id = decodeURIComponent(p.slice(1));
+    if (url.searchParams.get('alt') === 'media') {
+      return drive.files[id] ? send(res, 200, drive.files[id], { 'Content-Type': 'image/jpeg', ...cors }) : send(res, 404, { error: { code: 404, message: 'File not found' } }, cors);
+    }
+    if (drive.folders[id]) return send(res, 200, { id, name: drive.folders[id].name, mimeType: 'application/vnd.google-apps.folder' }, cors);
+    if (drive.meta[id]) return send(res, 200, drive.meta[id], cors);
+    return send(res, 404, { error: { code: 404, message: `File not found: ${id}.` } }, cors);
+  }
+
   const base = { serviceKey: 'test-service-role-key' };
   const server = http.createServer(async (req, res) => {
     try {
@@ -273,13 +300,14 @@ export function createMockBackend() {
       if (req.headers['x-amz-target']) return rekognition(req, res, body);
       if (url.pathname.startsWith('/rest/v1/')) return rest(req, res, url, body);
       if (url.pathname.startsWith('/storage/v1/')) return storageApi(req, res, url, body, base);
+      if (url.pathname.startsWith('/drive/v3/files')) return driveApi(req, res, url);
       send(res, 404, { message: 'unknown' });
     } catch (e) {
       console.error('[mock]', e);
       send(res, 500, { message: e.message });
     }
   });
-  return { server, db, storage, collections, control, calls, serviceKey: base.serviceKey };
+  return { server, db, storage, collections, control, calls, drive, serviceKey: base.serviceKey };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
