@@ -14,6 +14,10 @@ export async function GET(request) {
       return new Response(small, { headers: { 'Content-Type': 'image/png' } });
     }
     const m = await sharp(out).metadata();
-    return NextResponse.json({ ok: true, ms: Date.now() - t, bytes: out.length, width: m.width, height: m.height });
+    const path = (await import('node:path')).default;
+    const F = path.join(process.cwd(), 'assets', 'fonts');
+    const w = async (font, file) => (await sharp({ text: { text: 'jab we wed', font: `${font} 100`, fontfile: path.join(F, file), dpi: 72, rgba: true } }).png().toBuffer({ resolveWithObject: true })).info.width;
+    const widths = { allura: await w('Allura', 'Allura-Regular.ttf'), cinzel: await w('Cinzel', 'Cinzel.ttf'), serif: await w('Cormorant Garamond', 'CormorantGaramond-Italic.ttf'), fallback: await w('sans', 'nope.ttf').catch((e) => e.message) };
+    return NextResponse.json({ ok: true, ms: Date.now() - t, bytes: out.length, width: m.width, height: m.height, widths });
   } catch (e) { return NextResponse.json({ ok: false, error: e.message, stack: String(e.stack).slice(0, 500) }); }
 }
