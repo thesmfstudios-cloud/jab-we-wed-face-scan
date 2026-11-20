@@ -270,7 +270,7 @@ export function createMockBackend() {
   // Google Drive v3 (API key) mock: drive.folders[id] = { name, children: [{id,name,mimeType,size}] }, drive.files[id] = Buffer
   // Private mode: a service account (drive.saPublicKey) gets a bearer token from
   // /oauth/token; it can only see folders listed in drive.sharedWithSa.
-  const drive = { key: 'test-drive-key', folders: {}, files: {}, meta: {}, saPublicKey: null, sharedWithSa: new Set(), tokens: new Set() };
+  const drive = { key: 'test-drive-key', folders: {}, files: {}, meta: {}, saPublicKey: null, sharedWithSa: new Set(), tokens: new Set(), publicFolders: new Set() };
   function oauthToken(req, res, body) {
     const form = new URLSearchParams(body.toString());
     const [h, p, sig] = String(form.get('assertion') || '').split('.');
@@ -280,6 +280,29 @@ export function createMockBackend() {
     const token = `ya29.${crypto.randomUUID()}`;
     drive.tokens.add(token);
     return send(res, 200, { access_token: token, expires_in: 3599, token_type: 'Bearer' });
+  }
+  // Link mode: Drive web folder view + public download host.
+  const esc = (t) => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/'/g, '&#39;');
+  const publicParentOf = (fileId) => Object.entries(drive.folders).find(([fid, f]) => drive.publicFolders.has(fid) && f.children.some((c) => c.id === fileId));
+  function driveWeb(req, res, url) {
+    calls.push({ driveWeb: url.pathname });
+    if (url.pathname === '/embeddedfolderview') {
+      const id = url.searchParams.get('id');
+      const f = drive.folders[id];
+      if (!f || !drive.publicFolders.has(id)) return send(res, 404, '<html><title>Error 404 (Not Found)</title></html>', { 'Content-Type': 'text/html' });
+      const rows = f.children.map((c) => {
+        const folder = c.mimeType === 'application/vnd.google-apps.folder';
+        const href = folder ? `https://drive.google.com/drive/folders/${c.id}` : `https://drive.google.com/file/d/${c.id}/view?usp=drive_web`;
+        return `<div class="flip-entry" id="entry-${c.id}" tabindex="0" role="link"><div class="flip-entry-info"><a href="${href}" target="_blank"><div class="flip-entry-thumb"></div><div class="flip-entry-title">${esc(c.name)}</div></a></div></div>`;
+      }).join('');
+      return send(res, 200, `<!DOCTYPE html><html><head><title>${esc(f.name)}</title></head><body><div class="flip-entries">${rows}</div></body></html>`, { 'Content-Type': 'text/html; charset=utf-8' });
+    }
+    if (url.pathname === '/download') {
+      const id = url.searchParams.get('id');
+      if (!drive.files[id] || !publicParentOf(id)) return send(res, 200, '<html><body>Sign in</body></html>', { 'Content-Type': 'text/html' });
+      return send(res, 200, drive.files[id], { 'Content-Type': 'image/jpeg', 'Content-Length': String(drive.files[id].length) });
+    }
+    return send(res, 404, 'nope', { 'Content-Type': 'text/html' });
   }
   function driveApi(req, res, url) {
     calls.push({ drive: url.pathname, q: url.searchParams.get('q') });
@@ -319,6 +342,7 @@ export function createMockBackend() {
       if (url.pathname.startsWith('/storage/v1/')) return storageApi(req, res, url, body, base);
       if (url.pathname.startsWith('/drive/v3/files')) return driveApi(req, res, url);
       if (url.pathname === '/oauth/token') return oauthToken(req, res, body);
+      if (url.pathname === '/embeddedfolderview' || url.pathname === '/download') return driveWeb(req, res, url);
       send(res, 404, { message: 'unknown' });
     } catch (e) {
       console.error('[mock]', e);
