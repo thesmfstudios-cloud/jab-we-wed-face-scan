@@ -35,6 +35,7 @@ export function createMockBackend() {
       const test = (row) => {
         const cell = row[k];
         if (op === 'eq') return String(cell) === String(parseVal(arg)) || cell === parseVal(arg);
+        if (op === 'neq') return String(cell) !== String(parseVal(arg));
         if (op === 'in') return parseList(arg).includes(String(cell));
         if (op === 'is') return arg === 'null' ? cell == null : cell === parseVal(arg);
         throw new Error(`unsupported op ${op}`);

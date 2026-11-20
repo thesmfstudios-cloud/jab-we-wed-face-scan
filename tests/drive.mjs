@@ -57,6 +57,7 @@ const env = {
   NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: 'test-publishable',
   SUPABASE_SERVICE_ROLE_KEY: mock.serviceKey,
   ADMIN_ACCESS_CODE: ADMIN_CODE,
+  CRON_SECRET: 'cron-secret-0123456789abcdef',
   ADMIN_SESSION_SECRET: 'drive-test-session-secret-0123456789abcdef',
   AWS_ACCESS_KEY_ID: 'AKIATEST', AWS_SECRET_ACCESS_KEY: 'secret', AWS_REGION: 'ap-south-1',
   AWS_REKOGNITION_ENDPOINT: `http://127.0.0.1:${MOCK_PORT}`,
@@ -168,6 +169,14 @@ try {
   check('Missing ticket rejected', (await fetch(`${APP}/api/download/file`)).status === 401);
   await api(`/api/admin/events/${eventId}`, { method: 'PATCH', body: { guestAccess: false } });
   check('Closing the gallery blocks existing links', (await fetch(`${APP}${fA.url}`)).status === 401);
+
+  // Automatic sync: a new Drive photo is picked up and face-scanned without the admin.
+  mock.drive.folders[FOLDER].children.push({ id: 'fileF_0123456789', name: 'IMG_0004.jpg', mimeType: 'image/jpeg', size: String(big.length) });
+  mock.drive.files.fileF_0123456789 = big;
+  check('Auto-sync rejects a wrong secret', (await fetch(`${APP}/api/cron/drive-sync?secret=nope`)).status === 401);
+  const cron = await (await fetch(`${APP}/api/cron/drive-sync`, { headers: { Authorization: 'Bearer cron-secret-0123456789abcdef' } })).json();
+  const ev = cron.events?.[0] || {};
+  check('Auto-sync adds + face-scans new Drive photos', ev.added === 1 && ev.indexed === 1 && ev.remaining === 0 && mock.db.jw_photos.find((p) => p.drive_file_id === 'fileF_0123456789')?.indexed_at, JSON.stringify(cron));
 
   const del = await api(`/api/admin/events/${eventId}/photos`, { method: 'DELETE', body: { photoIds: [mock.db.jw_photos[0].id] } });
   check('Deleting a Drive photo works (Drive file untouched)', del.status === 200 && del.data.deleted === 1 && mock.drive.files.fileA_0123456789);

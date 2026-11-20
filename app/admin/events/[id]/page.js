@@ -56,6 +56,7 @@ function EventAdmin() {
         {TABS.map((t) => <button key={t} role="tab" className="tab" aria-selected={tab === t} onClick={() => setTab(t)}>{t}</button>)}
       </div>
       {error && <div className="notice notice-error" style={{ marginBottom: 14 }}>{error}</div>}
+      <AutoScan event={event} stats={stats} onChange={setEvent} reload={reload} />
 
       {tab === 'Overview' && <Overview event={event} stats={stats} patch={patch} goto={setTab} />}
       {tab === 'Upload' && <><DriveImport event={event} onSynced={(ev) => setEvent(ev)} goto={setTab} /><Uploader event={event} onDone={reload} /></>}
@@ -64,6 +65,34 @@ function EventAdmin() {
       {tab === 'Settings' && <Settings event={event} patch={patch} onDeleted={reload} />}
     </>
   );
+}
+
+/* ───────────── Automatic face scan when new photos are waiting ───────────── */
+function AutoScan({ event, stats, onChange, reload }) {
+  const [state, setState] = useState(null); // { text, type }
+  const ran = useRef(false);
+  const waiting = event.photos_count > event.indexed_count;
+  useEffect(() => {
+    // Only on opening the page (the Drive panel runs its own scan after a sync).
+    if (ran.current || !stats) return;
+    ran.current = true;
+    if (!waiting || (stats.indexErrors || 0) > 0) return;
+    (async () => {
+      let ev = event, errors = 0;
+      try {
+        for (;;) {
+          setState({ type: 'info', text: `Scanning faces of new photos… ${ev.indexed_count}/${ev.photos_count}` });
+          const r = await api(`/api/admin/events/${event.id}/index`, { method: 'POST', body: {} });
+          errors += r.errors; ev = r.event; onChange(r.event);
+          if (r.done || r.processed === 0) break;
+        }
+        setState({ type: errors ? 'error' : 'ok', text: errors ? `Face scan finished with ${errors} errors — see the Face index tab.` : `✓ Face scan done: ${ev.faces_count} faces in ${ev.indexed_count} photos. Guests can now find their photos.` });
+      } catch (e) { setState({ type: 'error', text: `Face scan stopped: ${e.message}` }); }
+      finally { reload(); }
+    })();
+  }, [event, stats, waiting, onChange, reload]);
+  if (!state) return null;
+  return <div className={`notice notice-${state.type}`} style={{ marginBottom: 14 }} aria-live="polite">{state.type === 'info' && <Loader2 className="spin" aria-hidden="true" />}<span>{state.text}</span></div>;
 }
 
 /* ───────────── Overview: stats, guest access, QR ───────────── */
